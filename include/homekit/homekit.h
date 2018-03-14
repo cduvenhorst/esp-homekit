@@ -14,8 +14,8 @@ typedef struct {
     // field must contain pointer to a function that should
     // somehow communicate password to the user (e.g. display
     // it on a screen if accessory has one).
-    char *password;
-    void (*password_callback)(const char *password);
+    char *setupCode;
+    void (*setupCode_callback)(const char *setupCode);
 
     // setupId in format "ABCD". Base36 coded.
     // If setupId is not provided, a random setupId
@@ -23,7 +23,7 @@ typedef struct {
     // field must contain pointer to a function that should
     // somehow communicate the setupURI to the user (e.g. display
     // a qrcode with the encoded URI on a screen if accessory has one).
-    char *setupId;
+    char *setupIdentifier;
     void (*setupURI_callback)(const char *setupURI);
 } homekit_server_config_t;
 

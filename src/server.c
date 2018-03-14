@@ -1038,13 +1038,13 @@ void homekit_server_on_pair_setup(client_context_t *context, const byte *data, s
             CLIENT_DEBUG(context, "Initializing crypto");
             DEBUG_HEAP();
 
-            if (context->server->config->password_callback) {
+            if (context->server->config->setupCode_callback) {
 
-              if (!context->server->config->password) {
+              if (!context->server->config->setupCode) {
                 homekit_generate_setupCode();
               }
 
-              context->server->config->password_callback(setupCode);
+              context->server->config->setupCode_callback(setupCode);
             }
 
             crypto_srp_init(
@@ -3209,7 +3209,7 @@ void homekit_setup_mdns(homekit_server_t *server) {
     // accessory category identifier
     add_txt("ci=%d", accessory->category);
 
-    if (server->config->setupId) {
+    if (server->config->setupIdentifier) {
       // setup hash key used by HomeKit to match a device against its QR code
       // during auto setup. The setupHash should persist across reboots,
       // as its constituents must also persist.
@@ -3266,17 +3266,17 @@ void homekit_server_task(void *args) {
 
     if (server->config->setupURI_callback) {
 
-      if (!server->config->setupId) {
+      if (!server->config->setupIdentifier) {
           for (int i=0; i<4; i++) {
               setupIdentifier[i] = base36Table[(hwrand() % 36)];
           }
           setupIdentifier[4] = 0;
-          server->config->setupId = setupIdentifier;
+          server->config->setupIdentifier = setupIdentifier;
 
           DEBUG("Using random setup identifier: %s", setupIdentifier);
       }
 
-      if (!server->config->password) {
+      if (!server->config->setupCode) {
         homekit_generate_setupCode();
         DEBUG("Using random setup code for setup URI: %s", setupCode);
       }
@@ -3327,24 +3327,24 @@ void homekit_server_init(homekit_server_config_t *config) {
         return;
     }
 
-    if (!(config->password_callback || config->setupURI_callback)) {
+    if (!(config->setupCode_callback || config->setupURI_callback)) {
 
       // at least a password must be present, if no callback is available.
-      if (!config->password) {
+      if (!config->setupCode) {
         ERROR("Error initializing HomeKit accessory server: "
               "neither setupCode nor display callback is specified");
         return;
       }
     }
 
-    if (config->setupId && !(config->password || config->setupURI_callback)) {
+    if (config->setupIdentifier && !(config->setupCode || config->setupURI_callback)) {
       ERROR("Error initializing HomeKit accessory server: "
             "setup initializer is set but neither setupCode nor URI display callback is specified");
       return;
     }
 
-    if (config->password) {
-        const char *p = config->password;
+    if (config->setupCode) {
+        const char *p = config->setupCode;
         if (strlen(p) != 10 ||
                 !(ISDIGIT(p[0]) && ISDIGIT(p[1]) && ISDIGIT(p[2]) && p[3] == '-' &&
                     ISDIGIT(p[4]) && ISDIGIT(p[5]) && p[6] == '-' &&
@@ -3353,13 +3353,13 @@ void homekit_server_init(homekit_server_config_t *config) {
                   "invalid password format");
             return;
         } else {
-          strncpy(setupCode, config->password, sizeof(setupCode));
+          strncpy(setupCode, config->setupCode, sizeof(setupCode));
           DEBUG("Using user-specified setupCode: %s", setupCode);
         }
     }
 
-    if (config->setupId) {
-      const char *sid = config->setupId;
+    if (config->setupIdentifier) {
+      const char *sid = config->setupIdentifier;
       if (strlen(sid) != 4 ||
             !((ISALPHA(sid[0]) || ISDIGIT(sid[0])) &&
               (ISALPHA(sid[1]) || ISDIGIT(sid[1])) &&
@@ -3370,7 +3370,7 @@ void homekit_server_init(homekit_server_config_t *config) {
               "invalid setupId format");
         return;
       } else {
-        strncpy(setupIdentifier, config->setupId, sizeof(setupIdentifier));
+        strncpy(setupIdentifier, config->setupIdentifier, sizeof(setupIdentifier));
         DEBUG("Using user-specified setup identifier: %s", setupIdentifier);
       }
     }
