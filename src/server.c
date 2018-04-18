@@ -6,6 +6,7 @@
 #include <stdbool.h>
 #include <esp/hwrand.h>
 #include <espressif/esp_common.h>
+#include <esplibs/libmain.h>
 
 #include <lwip/sockets.h>
 
@@ -1013,6 +1014,10 @@ void homekit_server_on_pair_setup(client_context_t *context, const byte *data, s
     DEBUG("Pair Setup");
     DEBUG_HEAP();
 
+#ifdef HOMEKIT_OVERCLOCK_PAIR_SETUP
+    sdk_system_overclock();
+#endif
+
     tlv_values_t *message = tlv_new();
     tlv_parse(data, size, message);
 
@@ -1503,11 +1508,19 @@ void homekit_server_on_pair_setup(client_context_t *context, const byte *data, s
     }
 
     tlv_free(message);
+
+#ifdef HOMEKIT_OVERCLOCK_PAIR_SETUP
+    sdk_system_restoreclock();
+#endif
 }
 
 void homekit_server_on_pair_verify(client_context_t *context, const byte *data, size_t size) {
     DEBUG("HomeKit Pair Verify");
     DEBUG_HEAP();
+
+#ifdef HOMEKIT_OVERCLOCK_PAIR_VERIFY
+    sdk_system_overclock();
+#endif
 
     tlv_values_t *message = tlv_new();
     tlv_parse(data, size, message);
@@ -1931,6 +1944,10 @@ void homekit_server_on_pair_verify(client_context_t *context, const byte *data, 
     }
 
     tlv_free(message);
+
+#ifdef HOMEKIT_OVERCLOCK_PAIR_VERIFY
+    sdk_system_restoreclock();
+#endif
 }
 
 
