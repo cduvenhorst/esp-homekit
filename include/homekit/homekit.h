@@ -17,8 +17,8 @@ typedef struct {
     char *setupCode;
     void (*setupCode_callback)(const char *setupCode);
 
-    // setupId in format "ABCD". Base36 coded.
-    // If setupId is not provided, a random setupId
+    // A four character setupIdentifier in format "ABCD". Use alphanummeric chars.
+    // If the setupIdentifier is not provided, a random setupIdentifier
     // will be used. In that case, the setupURI_callback
     // field must contain pointer to a function that should
     // somehow communicate the setupURI to the user (e.g. display
