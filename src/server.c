@@ -180,16 +180,6 @@ void server_free(homekit_server_t *server) {
     free(server);
 }
 
-#ifdef HOMEKIT_DEBUG
-#define TLV_DEBUG(values) tlv_debug(values)
-#else
-#define TLV_DEBUG(values)
-#endif
-
-#define CLIENT_DEBUG(client, message, ...) DEBUG("[Client %d] " message, client->socket, ##__VA_ARGS__)
-#define CLIENT_INFO(client, message, ...) INFO("[Client %d] " message, client->socket, ##__VA_ARGS__)
-#define CLIENT_ERROR(client, message, ...) ERROR("[Client %d] " message, client->socket, ##__VA_ARGS__)
-
 void tlv_debug(const tlv_values_t *values) {
     DEBUG("Got following TLV values:");
     for (tlv_t *t=values->head; t; t=t->next) {
@@ -1982,7 +1972,7 @@ void homekit_server_on_get_characteristics(client_context_t *context) {
     }
 
     characteristic_format_t format = 0;
-    if (bool_endpoint_param("meta")) 
+    if (bool_endpoint_param("meta"))
         format |= characteristic_format_meta;
 
     if (bool_endpoint_param("perms"))
@@ -2934,7 +2924,7 @@ client_context_t *homekit_server_accept_client(homekit_server_t *server) {
 
     const int maxpkt = 4; /* Drop connection after 4 probes without response */
     setsockopt(s, IPPROTO_TCP, TCP_KEEPCNT, &maxpkt, sizeof(maxpkt));
-    
+
     client_context_t *context = client_context_new();
     context->server = server;
     context->socket = s;
@@ -3162,7 +3152,7 @@ void homekit_setup_mdns(homekit_server_t *server) {
     add_txt("ci=%d", accessory->category);
 
     INFO("mDNS announcement: Name=%s %s Port=%d TTL=%d", name->value.string_value, txt_rec, PORT, MDNS_TTL);
-    
+
     mdns_clear();
     mdns_add_facility(name->value.string_value, "_hap", txt_rec, mdns_TCP, PORT, MDNS_TTL);
 }
