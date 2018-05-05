@@ -69,5 +69,17 @@ ifeq ($(HOMEKIT_OVERCLOCK),1)
 endif
 
 ifeq ($(HOMEKIT_DEBUG),1)
-homekit_CFLAGS += -DHOMEKIT_DEBUG
+homekit_CFLAGS += -DHOMEKIT_DEBUG=1
+endif
+
+ifeq ($(HOMEKIT_DEBUG),2)
+homekit_CFLAGS += -DHOMEKIT_DEBUG=2
+endif
+
+ifeq ($(HOMEKIT_DEBUG),3)
+homekit_CFLAGS += -DHOMEKIT_DEBUG=3
+endif
+
+ifeq ($(HOMEKIT_DEBUG),4)
+homekit_CFLAGS += -DHOMEKIT_DEBUG=4
 endif

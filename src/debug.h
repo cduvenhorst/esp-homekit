@@ -11,7 +11,7 @@ void tlv_debug(const tlv_values_t *values);
 #if HOMEKIT_DEBUG >= 1 // Error
 #define ERROR(message, ...) printf("HomeKit ERROR: " message "\n", ##__VA_ARGS__)
 #else
-#define INFO(message, ...)
+#define ERROR(message, ...)
 #endif
 
 #if HOMEKIT_DEBUG >= 2 // Warn
