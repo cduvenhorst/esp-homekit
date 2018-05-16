@@ -4,21 +4,26 @@
 #include <string.h>
 #include <stdarg.h>
 #include <stdbool.h>
-#include <esp/hwrand.h>
-#include <espressif/esp_common.h>
-#include <esplibs/libmain.h>
 
 #include <lwip/sockets.h>
 
 #include <unistd.h>
+
+#if defined(ESP_IDF)
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+#include <freertos/queue.h>
+#elif defined(ESP_OPEN_RTOS)
 #include <FreeRTOS.h>
 #include <task.h>
 #include <queue.h>
+#else
+#error "Unknown target platform"
+#endif
 
 #include <wolfssl/wolfcrypt/hash.h>
 #include <wolfssl/wolfcrypt/coding.h>
 
-#include "mdnsresponder.h"
 #include <http-parser/http_parser.h>
 #include <cJSON.h>
 
@@ -29,16 +34,13 @@
 #include "query_params.h"
 #include "json.h"
 #include "debug.h"
+#include "port.h"
 
 #include "homekit/homekit.h"
 #include "homekit/characteristics.h"
 
 
 #define PORT 5556
-
-#ifndef MDNS_TTL
-#define MDNS_TTL 4500
-#endif
 
 #ifndef HOMEKIT_MAX_CLIENTS
 #define HOMEKIT_MAX_CLIENTS 16
@@ -96,7 +98,9 @@ typedef struct {
     bool paired;
     pairing_context_t *pairing_context;
 
-    struct pollfd *fds;
+    int listen_fd;
+    fd_set fds;
+    int max_fd;
     int nfds;
 
     client_context_t *clients;
@@ -150,7 +154,8 @@ void pairing_context_free(pairing_context_t *context);
 
 homekit_server_t *server_new() {
     homekit_server_t *server = malloc(sizeof(homekit_server_t));
-    server->fds = malloc(sizeof(struct pollfd) * (HOMEKIT_MAX_CLIENTS+1));
+    FD_ZERO(&server->fds);
+    server->max_fd = 0;
     server->nfds = 0;
     server->accessory_id = NULL;
     server->accessory_key = NULL;
@@ -171,9 +176,6 @@ void server_free(homekit_server_t *server) {
 
     if (server->pairing_context)
         pairing_context_free(server->pairing_context);
-
-    if (server->fds)
-        free(server->fds);
 
     if (server->clients) {
         client_context_t *client = server->clients;
@@ -1005,7 +1007,7 @@ void homekit_server_on_pair_setup(client_context_t *context, const byte *data, s
     DEBUG_HEAP();
 
 #ifdef HOMEKIT_OVERCLOCK_PAIR_SETUP
-    sdk_system_overclock();
+    homekit_overclock_start();
 #endif
 
     tlv_values_t *message = tlv_new();
@@ -1500,7 +1502,7 @@ void homekit_server_on_pair_setup(client_context_t *context, const byte *data, s
     tlv_free(message);
 
 #ifdef HOMEKIT_OVERCLOCK_PAIR_SETUP
-    sdk_system_restoreclock();
+    homekit_overclock_end();
 #endif
 }
 
@@ -1509,7 +1511,7 @@ void homekit_server_on_pair_verify(client_context_t *context, const byte *data, 
     DEBUG_HEAP();
 
 #ifdef HOMEKIT_OVERCLOCK_PAIR_VERIFY
-    sdk_system_overclock();
+    homekit_overclock_start();
 #endif
 
     tlv_values_t *message = tlv_new();
@@ -1936,7 +1938,7 @@ void homekit_server_on_pair_verify(client_context_t *context, const byte *data, 
     tlv_free(message);
 
 #ifdef HOMEKIT_OVERCLOCK_PAIR_VERIFY
-    sdk_system_restoreclock();
+    homekit_overclock_end();
 #endif
 }
 
@@ -2022,7 +2024,6 @@ void homekit_server_on_get_characteristics(client_context_t *context) {
         send_json_error_response(context, 400, HAPStatus_InvalidValue);
         return;
     }
-    char *id = strdup(id_param->value);
 
     bool bool_endpoint_param(const char *name) {
         query_param_t *param = query_params_find(context->endpoint_params, name);
@@ -2044,6 +2045,7 @@ void homekit_server_on_get_characteristics(client_context_t *context) {
 
     bool success = true;
 
+    char *id = strdup(id_param->value);
     char *ch_id;
     char *_id = id;
     while ((ch_id = strsep(&_id, ","))) {
@@ -2311,7 +2313,8 @@ void homekit_server_on_update_characteristics(client_context_t *context, const b
                         }
                     }
 
-                    h_value = HOMEKIT_INT(value, .format=ch->format);
+                    h_value.format = ch->format;
+                    h_value.int_value = value;
                     if (ch->setter) {
                         ch->setter(h_value);
                     } else {
@@ -2725,7 +2728,7 @@ void homekit_server_on_reset(client_context_t *context) {
 
     vTaskDelay(3000 / portTICK_PERIOD_MS);
 
-    sdk_system_restart();
+    homekit_system_restart();
 }
 
 
@@ -2920,13 +2923,9 @@ static void homekit_client_process(client_context_t *context) {
 void homekit_server_close_client(homekit_server_t *server, client_context_t *context) {
     CLIENT_INFO(context, "Closing client connection");
 
-    for (int i=1; i<server->nfds; i++) {
-        if (server->fds[i].fd == context->socket) {
-            server->fds[i] = server->fds[server->nfds-1];
-            server->nfds--;
-            break;
-        }
-    }
+    FD_CLR(context->socket, &server->fds);
+    // TODO: recalc server->max_fd ?
+    server->nfds--;
 
     lwip_close(context->socket);
 
@@ -2956,7 +2955,7 @@ void homekit_server_close_client(homekit_server_t *server, client_context_t *con
 
 
 client_context_t *homekit_server_accept_client(homekit_server_t *server) {
-    int s = accept(server->fds[0].fd, (struct sockaddr *)NULL, (socklen_t *)NULL);
+    int s = accept(server->listen_fd, (struct sockaddr *)NULL, (socklen_t *)NULL);
     if (s < 0)
         return NULL;
 
@@ -2990,9 +2989,10 @@ client_context_t *homekit_server_accept_client(homekit_server_t *server) {
 
     server->clients = context;
 
-    server->fds[server->nfds].fd = s;
-    server->fds[server->nfds].events = POLLIN;
+    FD_SET(s, &server->fds);
     server->nfds++;
+    if (s > server->max_fd)
+        server->max_fd = s;
 
     return context;
 }
@@ -3088,48 +3088,38 @@ static void homekit_run_server(homekit_server_t *server)
     DEBUG("Staring HTTP server");
 
     struct sockaddr_in serv_addr;
-    int listenfd = socket(AF_INET, SOCK_STREAM, 0);
+    server->listen_fd = socket(AF_INET, SOCK_STREAM, 0);
     memset(&serv_addr, '0', sizeof(serv_addr));
     serv_addr.sin_family = AF_INET;
     serv_addr.sin_addr.s_addr = htonl(INADDR_ANY);
     serv_addr.sin_port = htons(PORT);
-    bind(listenfd, (struct sockaddr*)&serv_addr, sizeof(serv_addr));
-    listen(listenfd, 10);
+    bind(server->listen_fd, (struct sockaddr*)&serv_addr, sizeof(serv_addr));
+    listen(server->listen_fd, 10);
 
+    FD_SET(server->listen_fd, &server->fds);
+    server->max_fd = server->listen_fd;
     server->nfds = 1;
-    server->fds[0].fd = listenfd;
-    server->fds[0].events = POLLIN;
 
     for (;;) {
-        int triggered_nfds = poll(server->fds, server->nfds, 1000);
-        if (triggered_nfds) {
-            if (server->fds[0].revents & POLLIN) {
+        fd_set read_fds;
+        memcpy(&read_fds, &server->fds, sizeof(read_fds));
+
+        struct timeval timeout = { 1, 0 }; /* 1 second timeout */
+        int triggered_nfds = select(server->max_fd + 1, &read_fds, NULL, NULL, &timeout);
+        if (triggered_nfds > 0) {
+            if (FD_ISSET(server->listen_fd, &read_fds)) {
                 homekit_server_accept_client(server);
                 triggered_nfds--;
             }
 
-            for (int i=1; i<server->nfds && triggered_nfds; i++) {
-                if (!server->fds[i].revents)
-                    continue;
-
-                triggered_nfds--;
-
-                client_context_t *context = homekit_server_find_client_by_fd(
-                    server, server->fds[i].fd
-                );
-                if (!context) {
-                    // cleanup orphan FD, although should not happen
-                    server->nfds--;
-                    server->fds[i] = server->fds[server->nfds];
-                    i--;
-                    continue;
-                }
-
-                if (server->fds[i].revents & POLLIN) {
+            client_context_t *context = server->clients;
+            while (context && triggered_nfds) {
+                if (FD_ISSET(context->socket, &read_fds)) {
                     homekit_client_process(context);
-                } else if (server->fds[i].revents & (POLLNVAL | POLLERR)) {
-                    context->disconnect = true;
+                    triggered_nfds--;
                 }
+
+                context = context->next;
             }
 
             homekit_server_close_clients(server);
@@ -3192,66 +3182,50 @@ void homekit_setup_mdns(homekit_server_t *server) {
         return;
     }
 
-    char txt_rec[128];
-    txt_rec[0] = 0;
-
-    void add_txt(const char *format, ...) {
-        va_list arg_ptr;
-        va_start(arg_ptr, format);
-
-        char buffer[128];
-        int buffer_len = vsnprintf(buffer, sizeof(buffer), format, arg_ptr);
-
-        va_end(arg_ptr);
-
-        if (buffer_len && buffer_len < sizeof(buffer)-1)
-            mdns_TXT_append(txt_rec, sizeof(txt_rec), buffer, buffer_len);
-    }
+    homekit_mdns_configure_init(name->value.string_value, PORT);
 
     // accessory model name (required)
-    add_txt("md=%s", model->value.string_value);
+    homekit_mdns_add_txt("md", "%s", model->value.string_value);
     // protocol version (required)
-    add_txt("pv=1.0");
+    homekit_mdns_add_txt("pv", "1.0");
     // device ID (required)
     // should be in format XX:XX:XX:XX:XX:XX, otherwise devices will ignore it
-    add_txt("id=%s", server->accessory_id);
+    homekit_mdns_add_txt("id", "%s", server->accessory_id);
     // current configuration number (required)
-    add_txt("c#=%d", accessory->config_number);
+    homekit_mdns_add_txt("c#", "%d", accessory->config_number);
     // current state number (required)
-    add_txt("s#=1");
+    homekit_mdns_add_txt("s#", "1");
     // feature flags (required if non-zero)
     //   bit 0 - supports HAP pairing. required for all HomeKit accessories
     //   bits 1-7 - reserved
     // NOTE: On non-certified HAP devices (like this package), we can't
     // set this to 0x01 as clients will send parameters we don't understand.
-    add_txt("ff=0");
+    homekit_mdns_add_txt("ff", "0");
     // status flags
     //   bit 0 - not paired
     //   bit 1 - not configured to join WiFi
     //   bit 2 - problem detected on accessory
     //   bits 3-7 - reserved
-    add_txt("sf=%d", (server->paired) ? 0 : 1);
+    homekit_mdns_add_txt("sf", "%d", (server->paired) ? 0 : 1);
     // accessory category identifier
-    add_txt("ci=%d", accessory->category);
+    homekit_mdns_add_txt("ci", "%d", accessory->category);
 
     if (server->config->setupIdentifier) {
       // setup hash key used by HomeKit to match a device against its QR code
       // during auto setup. The setupHash should persist across reboots,
       // as its constituents must also persist.
-      add_txt("sh=%s",homekit_accessory_setupHash(server));
+      homekit_mdns_add_txt("sh", "%s", homekit_accessory_setupHash(server));
     }
 
-    INFO("mDNS announcement: Name=%s %s Port=%d TTL=%d", name->value.string_value, txt_rec, PORT, MDNS_TTL);
-
-    mdns_clear();
-    mdns_add_facility(name->value.string_value, "_hap", txt_rec, mdns_TCP, PORT, MDNS_TTL);
+    homekit_mdns_configure_finalize();
 }
 
 char *homekit_accessory_id_generate() {
     char *accessory_id = malloc(18);
 
     byte buf[6];
-    hwrand_fill(buf, sizeof(buf));
+    homekit_random_fill(buf, sizeof(buf));
+
     snprintf(accessory_id, 18, "%02X:%02X:%02X:%02X:%02X:%02X",
              buf[0], buf[1], buf[2], buf[3], buf[4], buf[5]);
 
@@ -3327,16 +3301,7 @@ void homekit_server_task(void *args) {
         server->paired = true;
     }
 
-    if (sdk_wifi_station_get_connect_status() != STATION_GOT_IP) {
-        INFO("Waiting for IP");
-        while (sdk_wifi_station_get_connect_status() != STATION_GOT_IP) {
-            vTaskDelay(1000 / portTICK_PERIOD_MS);
-        }
-
-        INFO("Got IP, starting");
-    }
-
-    mdns_init();
+    homekit_mdns_init();
     homekit_setup_mdns(server);
 
     homekit_run_server(server);
@@ -3407,7 +3372,7 @@ void homekit_server_init(homekit_server_config_t *config) {
     homekit_server_t *server = server_new();
     server->config = config;
 
-    xTaskCreate(homekit_server_task, "HomeKit Server", 2048, server, 1, NULL);
+    xTaskCreate(homekit_server_task, "HomeKit Server", SERVER_TASK_STACK, server, 1, NULL);
 }
 
 void homekit_server_reset() {
