@@ -3187,7 +3187,12 @@ void homekit_setup_mdns(homekit_server_t *server) {
     // accessory model name (required)
     homekit_mdns_add_txt("md", "%s", model->value.string_value);
     // protocol version (required)
-    homekit_mdns_add_txt("pv", "1.0");
+    if (server->config->setupIdentifier) {
+      // version 1.1 supports QR-Code pairing
+      homekit_mdns_add_txt("pv", "1.1");
+    } else {
+      homekit_mdns_add_txt("pv", "1.0");
+    }
     // device ID (required)
     // should be in format XX:XX:XX:XX:XX:XX, otherwise devices will ignore it
     homekit_mdns_add_txt("id", "%s", server->accessory_id);
@@ -3209,11 +3214,10 @@ void homekit_setup_mdns(homekit_server_t *server) {
     homekit_mdns_add_txt("sf", "%d", (server->paired) ? 0 : 1);
     // accessory category identifier
     homekit_mdns_add_txt("ci", "%d", accessory->category);
-
     if (server->config->setupIdentifier) {
       // setup hash key used by HomeKit to match a device against its QR code
-      // during auto setup. The setupHash should persist across reboots,
-      // as its constituents must also persist.
+      // during auto setup. The setupIdentifier and accessory id should persist
+      //across reboots, as its constituents must also persist.
       homekit_mdns_add_txt("sh", "%s", homekit_accessory_setupHash(server));
     }
 
