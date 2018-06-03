@@ -995,7 +995,7 @@ const char* homekit_generate_setupURI(homekit_server_t *server) {
 
  void homekit_generate_setupCode() {
   for (int i=0; i<10; i++) {
-      setupCode[i] = base36Table[(hwrand() % 10)];
+      setupCode[i] = base36Table[(homekit_random() % 10)];
   }
   setupCode[3] = setupCode[6] = '-';
   setupCode[10] = 0;
@@ -3273,7 +3273,7 @@ void homekit_server_task(void *args) {
 
       if (!server->config->setupIdentifier) {
           for (int i=0; i<4; i++) {
-              setupIdentifier[i] = base36Table[(hwrand() % 36)];
+              setupIdentifier[i] = base36Table[(homekit_random() % 36)];
           }
           setupIdentifier[4] = 0;
           server->config->setupIdentifier = setupIdentifier;

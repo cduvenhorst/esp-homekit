@@ -92,7 +92,7 @@ $(eval $(call component_compile_rules,homekit))
 
 else
 	# ESP_IDF
-	COMPONENT_DEPENDS = wolfssl cJSON http-parser
+	COMPONENT_DEPENDS = wolfssl json http-parser
 
 	COMPONENT_PRIV_INCLUDEDIRS = src
 	COMPONENT_SRCDIRS = src
