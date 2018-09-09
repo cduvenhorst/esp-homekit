@@ -2313,8 +2313,8 @@ void homekit_server_on_update_characteristics(client_context_t *context, const b
                         }
                     }
 
+                    h_value = HOMEKIT_INT(value);
                     h_value.format = ch->format;
-                    h_value.int_value = value;
                     if (ch->setter) {
                         ch->setter(h_value);
                     } else {
@@ -2447,6 +2447,9 @@ void homekit_server_on_update_characteristics(client_context_t *context, const b
             json_string(json1, "status"); json_integer(json1, statuses[i]);
             json_object_end(json1);
         }
+
+        json_array_end(json1);
+        json_object_end(json1); // response
 
         json_flush(json1);
         json_free(json1);
@@ -2696,9 +2699,9 @@ void homekit_server_on_pairings(client_context_t *context, const byte *data, siz
                 }
                 r = crypto_ed25519_export_public_key(pairing->device_key, public_key, &public_key_size);
 
-                tlv_add_string_value(response, TLVType_Identifier, pairing->device_id);
-                tlv_add_value(response, TLVType_PublicKey, public_key, public_key_size);
                 tlv_add_integer_value(response, TLVType_Permissions, pairing->permissions);
+                tlv_add_value(response, TLVType_PublicKey, public_key, public_key_size);
+                tlv_add_string_value(response, TLVType_Identifier, pairing->device_id);
 
                 first = false;
 
@@ -3182,7 +3185,14 @@ void homekit_setup_mdns(homekit_server_t *server) {
         return;
     }
 
-    homekit_mdns_configure_init(name->value.string_value, PORT);
+    char unique_name[65]={0};
+    strncpy(unique_name, name->value.string_value, sizeof(unique_name)-6);
+    unique_name[strlen(unique_name)]='-';
+    unique_name[strlen(unique_name)]=server->accessory_id[0];
+    unique_name[strlen(unique_name)]=server->accessory_id[1];
+    unique_name[strlen(unique_name)]=server->accessory_id[3];
+    unique_name[strlen(unique_name)]=server->accessory_id[4];
+    homekit_mdns_configure_init(unique_name, PORT);
 
     // accessory model name (required)
     homekit_mdns_add_txt("md", "%s", model->value.string_value);
