@@ -1,7 +1,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "tlv.h"
+#include <homekit/tlv.h>
 
 
 tlv_values_t *tlv_new() {
@@ -34,9 +34,17 @@ int tlv_add_value(tlv_values_t *values, byte type, const byte *value, size_t siz
         tlv->value = NULL;
     }
     memcpy(tlv->value, value, size);
+    tlv->next = NULL;
 
-    tlv->next = values->head;
-    values->head = tlv;
+    if (!values->head) {
+        values->head = tlv;
+    } else {
+        tlv_t *t = values->head;
+        while (t->next) {
+            t = t->next;
+        }
+        t->next = tlv;
+    }
 
     return 0;
 }
@@ -60,6 +68,22 @@ int tlv_add_integer_value(tlv_values_t *values, byte type, int value) {
     return tlv_add_value(values, type, data, size);
 }
 
+int tlv_add_tlv_value(tlv_values_t *values, byte type, tlv_values_t *value) {
+    size_t tlv_size = 0;
+    tlv_format(value, NULL, &tlv_size);
+    byte *tlv_data = malloc(tlv_size);
+    int r = tlv_format(value, tlv_data, &tlv_size);
+    if (r) {
+        free(tlv_data);
+        return r;
+    }
+
+    r = tlv_add_value(values, type, tlv_data, tlv_size);
+    free(tlv_data);
+
+    return r;
+}
+
 
 tlv_t *tlv_get_value(const tlv_values_t *values, byte type) {
     tlv_t *t = values->head;
@@ -75,13 +99,30 @@ tlv_t *tlv_get_value(const tlv_values_t *values, byte type) {
 int tlv_get_integer_value(const tlv_values_t *values, byte type, int def) {
     tlv_t *t = tlv_get_value(values, type);
     if (!t)
-        return 0;
+        return def;
 
     int x = 0;
     for (int i=t->size-1; i>=0; i--) {
         x = (x << 8) + t->value[i];
     }
     return x;
+}
+
+
+tlv_values_t *tlv_get_tlv_value(const tlv_values_t *values, byte type) {
+    tlv_t *t = tlv_get_value(values, type);
+    if (!t)
+        return NULL;
+
+    tlv_values_t *value = tlv_new();
+    int r = tlv_parse(t->value, t->size, value);
+
+    if (r) {
+        tlv_free(value);
+        return NULL;
+    }
+
+    return value;
 }
 
 
