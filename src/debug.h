@@ -3,10 +3,8 @@
 
 #include <stdlib.h>
 #include <stdio.h>
-#include "tlv.h"
 
 typedef unsigned char byte;
-void tlv_debug(const tlv_values_t *values);
 
 #if HOMEKIT_DEBUG >= 1 // Error
 #define ERROR(message, ...) printf("HomeKit ERROR: " message "\n", ##__VA_ARGS__)
