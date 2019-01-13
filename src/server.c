@@ -556,7 +556,7 @@ void write_characteristic_json(json_stream *json, client_context_t *client, cons
                             byte *tlv_data = malloc(tlv_size);
                             tlv_format(v.tlv_values, tlv_data, &tlv_size);
 
-                            size_t encoded_tlv_size = base64_encoded_size(tlv_size);
+                            size_t encoded_tlv_size = base64_encoded_size(tlv_data, tlv_size);
                             byte *encoded_tlv_data = malloc(encoded_tlv_size + 1);
                             base64_encode(tlv_data, tlv_size, encoded_tlv_data);
                             encoded_tlv_data[encoded_tlv_size] = 0;
@@ -813,8 +813,8 @@ void send_tlv_response(client_context_t *context, tlv_values_t *values);
 
 void send_tlv_error_response(client_context_t *context, int state, TLVError error) {
     tlv_values_t *response = tlv_new();
-    tlv_add_integer_value(response, TLVType_State, state);
-    tlv_add_integer_value(response, TLVType_Error, error);
+    tlv_add_integer_value(response, TLVType_State, 1, state);
+    tlv_add_integer_value(response, TLVType_Error, 1, error);
 
     send_tlv_response(context, response);
 }
@@ -1133,7 +1133,7 @@ void homekit_server_on_pair_setup(client_context_t *context, const byte *data, s
             tlv_values_t *response = tlv_new();
             tlv_add_value(response, TLVType_PublicKey, context->server->pairing_context->public_key, context->server->pairing_context->public_key_size);
             tlv_add_value(response, TLVType_Salt, salt, salt_size);
-            tlv_add_integer_value(response, TLVType_State, 2);
+            tlv_add_integer_value(response, TLVType_State, 1, 2);
 
             free(salt);
 
@@ -1192,7 +1192,7 @@ void homekit_server_on_pair_setup(client_context_t *context, const byte *data, s
             r = crypto_srp_get_proof(context->server->pairing_context->srp, server_proof, &server_proof_size);
 
             tlv_values_t *response = tlv_new();
-            tlv_add_integer_value(response, TLVType_State, 4);
+            tlv_add_integer_value(response, TLVType_State, 1, 4);
             tlv_add_value(response, TLVType_Proof, server_proof, server_proof_size);
 
             free(server_proof);
@@ -1517,7 +1517,7 @@ void homekit_server_on_pair_setup(client_context_t *context, const byte *data, s
             }
 
             tlv_values_t *response = tlv_new();
-            tlv_add_integer_value(response, TLVType_State, 6);
+            tlv_add_integer_value(response, TLVType_State, 1, 6);
             tlv_add_value(response, TLVType_EncryptedData,
                           encrypted_response_data, encrypted_response_data_size);
 
@@ -1741,7 +1741,7 @@ void homekit_server_on_pair_verify(client_context_t *context, const byte *data, 
             }
 
             tlv_values_t *response = tlv_new();
-            tlv_add_integer_value(response, TLVType_State, 2);
+            tlv_add_integer_value(response, TLVType_State, 1, 2);
             tlv_add_value(response, TLVType_PublicKey,
                           my_key_public, my_key_public_size);
             tlv_add_value(response, TLVType_EncryptedData,
@@ -1959,7 +1959,7 @@ void homekit_server_on_pair_verify(client_context_t *context, const byte *data, 
             }
 
             tlv_values_t *response = tlv_new();
-            tlv_add_integer_value(response, TLVType_State, 4);
+            tlv_add_integer_value(response, TLVType_State, 1, 4);
 
             send_tlv_response(context, response);
 
@@ -2259,6 +2259,8 @@ void homekit_server_on_update_characteristics(client_context_t *context, const b
                         return HAPStatus_InvalidValue;
                     }
 
+                    CLIENT_DEBUG(context, "Updating characteristic %d.%d with boolean %s", aid, iid, value ? "true" : "false");
+
                     h_value = HOMEKIT_BOOL(value);
                     if (ch->setter) {
                         ch->setter(h_value);
@@ -2355,6 +2357,8 @@ void homekit_server_on_update_characteristics(client_context_t *context, const b
                         }
                     }
 
+                    CLIENT_DEBUG(context, "Updating characteristic %d.%d with integer %d", aid, iid, value);
+
                     h_value = HOMEKIT_INT(value);
                     h_value.format = ch->format;
                     if (ch->setter) {
@@ -2377,6 +2381,8 @@ void homekit_server_on_update_characteristics(client_context_t *context, const b
                         return HAPStatus_InvalidValue;
                     }
 
+                    CLIENT_DEBUG(context, "Updating characteristic %d.%d with %g", aid, iid, value);
+
                     h_value = HOMEKIT_FLOAT(value);
                     if (ch->setter) {
                         ch->setter(h_value);
@@ -2398,6 +2404,8 @@ void homekit_server_on_update_characteristics(client_context_t *context, const b
                         CLIENT_ERROR(context, "Failed to update %d.%d: value is too long", aid, iid);
                         return HAPStatus_InvalidValue;
                     }
+
+                    CLIENT_DEBUG(context, "Updating characteristic %d.%d with \"%s\"", aid, iid, value);
 
                     h_value = HOMEKIT_STRING(value);
                     if (ch->setter) {
@@ -2423,7 +2431,7 @@ void homekit_server_on_update_characteristics(client_context_t *context, const b
                         return HAPStatus_InvalidValue;
                     }
 
-                    size_t tlv_size = base64_decoded_size(value_len);
+                    size_t tlv_size = base64_decoded_size((unsigned char*)value, value_len);
                     byte *tlv_data = malloc(tlv_size);
                     if (base64_decode((byte*) value, value_len, tlv_data) < 0) {
                         free(tlv_data);
@@ -2438,6 +2446,13 @@ void homekit_server_on_update_characteristics(client_context_t *context, const b
                     if (r) {
                         CLIENT_ERROR(context, "Failed to update %d.%d: error parsing TLV", aid, iid);
                         return HAPStatus_InvalidValue;
+                    }
+
+                    CLIENT_DEBUG(context, "Updating characteristic %d.%d with TLV:", aid, iid);
+                    for (tlv_t *t=tlv_values->head; t; t=t->next) {
+                        char *escaped_payload = binary_to_string(t->value, t->size);
+                        CLIENT_DEBUG(context, "  Type %d value (%d bytes): %s", t->type, t->size, escaped_payload);
+                        free(escaped_payload);
                     }
 
                     h_value = HOMEKIT_TLV(tlv_values);
@@ -2670,7 +2685,7 @@ void homekit_server_on_pairings(client_context_t *context, const byte *data, siz
             crypto_ed25519_free(device_key);
 
             tlv_values_t *response = tlv_new();
-            tlv_add_integer_value(response, TLVType_State, 2);
+            tlv_add_integer_value(response, TLVType_State, 1, 2);
 
             send_tlv_response(context, response);
 
@@ -2749,7 +2764,7 @@ void homekit_server_on_pairings(client_context_t *context, const byte *data, siz
             free(device_identifier);
 
             tlv_values_t *response = tlv_new();
-            tlv_add_integer_value(response, TLVType_State, 2);
+            tlv_add_integer_value(response, TLVType_State, 1, 2);
 
             send_tlv_response(context, response);
             break;
@@ -2764,7 +2779,7 @@ void homekit_server_on_pairings(client_context_t *context, const byte *data, siz
             }
 
             tlv_values_t *response = tlv_new();
-            tlv_add_integer_value(response, TLVType_State, 2);
+            tlv_add_integer_value(response, TLVType_State, 1, 2);
 
             bool first = true;
 
@@ -2782,7 +2797,7 @@ void homekit_server_on_pairings(client_context_t *context, const byte *data, siz
 
                 tlv_add_string_value(response, TLVType_Identifier, pairing->device_id);
                 tlv_add_value(response, TLVType_PublicKey, public_key, public_key_size);
-                tlv_add_integer_value(response, TLVType_Permissions, pairing->permissions);
+                tlv_add_integer_value(response, TLVType_Permissions, 1, pairing->permissions);
 
                 first = false;
 
